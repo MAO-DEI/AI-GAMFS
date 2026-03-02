@@ -152,13 +152,11 @@ If you use AI-GAMFS in your research, please cite the following paper:
 
 
 ```bibtex
-@misc{gui2024advancingglobalaerosolforecasting,
-      title={Advancing global aerosol forecasting with artificial intelligence},
-      author={Ke Gui and Xutao Zhang and Huizheng Che and Lei Li and Yu Zheng and Linchang An and Yucong Miao and Hujia Zhao and Oleg Dubovik and Brent Holben and Jun Wang and Pawan Gupta and Elena S. Lind and Carlos Toledano and Hong Wang and Zhili Wang and Yaqiang Wang and Xiaomeng Huang and Kan Dai and Xiangao Xia and Xiaofeng Xu and Xiaoye Zhang},
-      year={2024},
-      eprint={2412.02498},
-      archivePrefix={arXiv},
-      primaryClass={physics.ao-ph},
-      url={https://arxiv.org/abs/2412.02498},
+@article{gui2026advancing,
+  title={Advancing operational global aerosol forecasting with machine learning},
+  author={Ke Gui, Xutao Zhang, Huizheng Che, Lei Li, Yu Zheng, Linchang An, Yucong Miao, Hujia Zhao, Oleg Dubovik, Brent Holben, Jun Wang, Pawan Gupta, Elena S. Lind, Carlos Toledano, Hong Wang, Zhili Wang, Yaqiang Wang, Xiaomeng Huang, Kan Dai, Xiangao Xia, Xiaofeng Xu, and Xiaoye Zhang},
+  journal={Nature},
+  year={2026},
+  url={https://www.nature.com/articles/s41586-026-10234-y}
 }
 ```

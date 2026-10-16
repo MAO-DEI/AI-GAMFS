@@ -51,21 +51,21 @@ def rolling_model(init_field,
                   method="3+6",
                   start_time=None):
     """
-    滚动训练核心代码（卧槽写的真牛逼）
-    @param init_field: 初始场
-    @param target_step: 目标步长
-    @param index: 索引
+    从初始场滚动预报到指定目标时效。
+    @param init_field: 标准化后的初始场张量，形状为 (1, channel, latitude, longitude)
+    @param target_step: 目标预报步数，每步 3 小时；例如 4 表示预报 12 小时后
+    @param index: 与数据通道一一对应的变量名列表
     @param model_3h: 3小时模型
     @param model_6h: 6小时模型
     @param model_9h: 9小时模型
     @param model_12h: 12小时模型
     @param device: 设备
-    @param method: 方法 optional: [3, 3+6, 3+6+9, 3+6+9+12]
-    @param start_time: 开始时刻
-    @return: 指定目标的预报值(已反归一化)
+    @param method: 方法 optional: [3, 3+6, 3+6+12, 3+6+9, 3+6+9+12]
+    @param start_time: 初始场对应的起报时间（pandas.Timestamp）
+    @return: 目标时刻反标准化后的 NumPy 数组，形状为 (channel, latitude, longitude)
     """
 
-    # 跳过初始场时刻 (不需要加3小时)
+    # time 表示当前输入场的时间；初始为起报时间，每次预测后按模型时效推进
     time = start_time
 
     if method == "3+6":
@@ -77,9 +77,14 @@ def rolling_model(init_field,
         output = init_field
         # 先运行6小时模型
         for _ in range(num_6h):
+
+            # 将时间信息转换为模型输入的时间标签，归一化到 [0, 1] 范围
             time_tag = torch.tensor([time.hour / 24, time.dayofweek / 7, time.dayofyear / 365.25]).to(device)
+            
+            # unsqueeze 是为了将 time_tag 转换为 (1, 3) 形状，符合模型输入要求
             output = model_6h(output.to(device), time_tag.unsqueeze(0))
             time = time + pd.Timedelta(hours=6)
+
         # 然后运行3小时模型
         if num_3h > 0:
             time_tag = torch.tensor([time.hour / 24, time.dayofweek / 7, time.dayofyear / 365.25]).to(device)
@@ -196,6 +201,7 @@ def rolling_model(init_field,
     results = output.detach().cpu().numpy().squeeze().copy()
     del output, init_field
     torch.cuda.empty_cache()
+
     return anti_stand(index, results)
 
 

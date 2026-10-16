@@ -138,7 +138,8 @@ def open_asm_merra(time, scale_factor = 2, interp_method ="linear"):
     @param time: 时间
     @param scale_factor: 初始场下采样比例
     @param interp_method: 下采样方法
-    @return: 数据矩阵
+    @return: 通道数为 54 时返回 (数据矩阵, 变量名列表, 一维经度数组, 一维纬度数组, 时间标识)；否则返回 None
+    数据矩阵形状为 (54, latitude, longitude)，尚未标准化。
     '''
 
     var_dict = get_vars()
@@ -166,9 +167,17 @@ def open_asm_merra(time, scale_factor = 2, interp_method ="linear"):
 
                 file = file[0]
                 f = xr.open_dataset(file)
+
+                # value 是变量列表
                 for var in value:
+                    # size(data) 由 (time, latitude, longitude) -> (latitude, longitude)
                     data = f[var].loc[time, :, :]
+                    #        ↑         ↑   ↑  ↑
+                    #     选一个变量   时间  全部纬度、全部经度
+
+                    # 下采样：每隔 scale_factor 个元素取一个
                     data = data.interp(lon=data.lon.values[::scale_factor], lat=data.lat.values[::scale_factor], method=interp_method)
+                    
                     total_matrix.append(data.values.squeeze())
                     index.append(var)
                 f.close()
@@ -203,7 +212,15 @@ def open_asm_merra(time, scale_factor = 2, interp_method ="linear"):
                 file = file[0]
                 f = xr.open_dataset(file)
 
+                # | 变量 | 含义 | 为什么需要多层 |
+                # |---|---|---|
+                # | `QV` | 比湿 | 不同高度的水汽含量不同 |
+                # | `T` | 温度 | 不同高度的温度不同 |
+                # | `U`、`V` | 纬向、经向风分量 | 不同高度的风速和风向不同 |
+                # | `SLP` | 海平面气压 | 表示折算到海平面的气压，每个经纬度位置只有一个值 |
+                
                 for var_ in value["var"]:
+                    # 当前配置的 QV、T、U、V 按 9 个层编号展开，共 36 个通道。
                     if var_ in ["H", "QV", "RH", "T", "U", "V", "OMEGA"]:
                         for level_ in value["level"]:
                             data = f[var_].loc[time, level_, :, :]
@@ -211,17 +228,21 @@ def open_asm_merra(time, scale_factor = 2, interp_method ="linear"):
                             total_matrix.append(data.values.squeeze())
                             index.append(var_ + "_" + str(level_))
                     else:
+                        # 当前配置的 SLP 是二维场，仅添加 1 个通道。
                         data = f[var_].loc[time, :, :]
                         data = data.interp(lon=data.lon.values[::scale_factor], lat=data.lat.values[::scale_factor], method=interp_method)
                         total_matrix.append(data.values.squeeze())
                         index.append(var_)
                 f.close()
 
+    # 将各二维场堆叠为 (channel, latitude, longitude)，index 记录对应通道名称。
     total_matrix = np.stack(total_matrix, axis=0)
 
     lon = data["lon"].values
     lat = data["lat"].values
 
+    # 当前 get_vars() 配置：12（气溶胶）+ 5（通量及相关变量）
+    # + 4（QV、T、U、V）× 9（垂直层）+ 1（SLP）= 54 个通道。
     if total_matrix.shape[0] == 54:
         return total_matrix, index, lon, lat, time_str
 

@@ -104,6 +104,7 @@ def closest_hour_marker(time_str):
 # 标准化
 def stand(index: list, data: np.ndarray, scale_factor: float = 1.0):
 
+    # norm 是一个包含每个变量的均值和标准差的 CSV 文件
     norm = pd.read_csv("./merra_norm.csv")
     for i in range(len(index)):
         x = norm[norm["index"] == index[i]]
@@ -115,7 +116,7 @@ def stand(index: list, data: np.ndarray, scale_factor: float = 1.0):
     return data
 
 
-# 反标准化
+# 反标准化：将标准化后的数据恢复到原始范围
 def anti_stand(index: list, data: np.ndarray, scale_factor: float = 1.0):
 
     norm = pd.read_csv("./merra_norm.csv")
@@ -131,7 +132,7 @@ def anti_stand(index: list, data: np.ndarray, scale_factor: float = 1.0):
 
 
 # 导入模式实况初始场
-def open_asm_merra(time, scale_factor = 2, interp_method ="linear"):
+def open_asm_merra(time:str, scale_factor = 2, interp_method ="linear"):
 
     '''
     用于读入GEOS同化初始场
@@ -177,7 +178,8 @@ def open_asm_merra(time, scale_factor = 2, interp_method ="linear"):
 
                     # 下采样：每隔 scale_factor 个元素取一个
                     data = data.interp(lon=data.lon.values[::scale_factor], lat=data.lat.values[::scale_factor], method=interp_method)
-                    
+
+                    # data.values.squeeze() 将 (1, lat, lon) -> (lat, lon)
                     total_matrix.append(data.values.squeeze())
                     index.append(var)
                 f.close()

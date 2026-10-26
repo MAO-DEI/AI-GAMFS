@@ -117,7 +117,7 @@ def get_init_field(year, month, day, hour, minute):
     init_field = stand(index, init_field)
     # 转为 PyTorch 张量并添加 batch 维度，返回形状为 (1, 54, latitude, longitude)
     init_field = torch.from_numpy(init_field).to(torch.float16).unsqueeze(0).float()
-    return init_field, init_time, index, lon, lat
+    return  init_field, init_time, index, lon, lat
 
 # 获取数据数组信息
 def get_dataarray_info():

@@ -107,6 +107,10 @@ class TransUnet(Module):
     pad_top = torch.floor_divide(pad_height, CONSTANTS.c0)
     _7 = int(pad_top)
     _8 = int(pad_top)
+
+    # pad_top = floor((576-H)/2)
+    # pad_bottom = pad_height - pad_top
+    # pad_bottom = 576 - pad_top
     pad_bottom = torch.sub(pad_height, pad_top)
     x2 = torch.pad(x1, [0, 0, _8, int(pad_bottom)])
 
@@ -137,7 +141,7 @@ class TransUnet(Module):
 
     # 同样得到 [B,3] 的正弦特征。
     sin_features = torch.stack([_18, _20, torch.sin(_21)], 1)
-    # [B,3]+[B,3] → [B,6]；顺序是三个 cos，接着三个 sin。
+    # [B,3] → [B,6]；顺序是三个 cos，接着三个 sin。
     time_features = torch.cat([cos_features, sin_features], 1)
 
     # 读取补齐后的场形状 [B,C,H,W]，这里 H=W=576。
@@ -149,6 +153,7 @@ class TransUnet(Module):
     _24 = int(W)
     _25 = torch.slice(time_features, 0, 0, 9223372036854775807)
     _26 = torch.slice(_25, 1, 0, 9223372036854775807)
+    
     # [B,6] → [B,6,1,1]，再 expand 成 [B,6,H,W]。
     # 每个样本的同一时间特征在所有网格点相同；expand 表达广播，不是学习操作。
     _27 = torch.unsqueeze(torch.unsqueeze(_26, 2), 3)
@@ -179,7 +184,6 @@ class TransUnet(Module):
     # 经过外层 conv3 模块, features.shape = [B, 5120, 36, 36]
     features = conv3.forward(_30)
 
-    # 【pwt】
     # ViT 返回已去掉 cls_token 的空间 token 序列 [B,N,D]。
     # 由下方还原操作可见，此导出路径要求 N=18×18=324。
     _31 = (vit).forward(features, )
@@ -191,25 +195,33 @@ class TransUnet(Module):
     element = ops.prim.NumToTensor(torch.size(_32, 0))
     _33 = int(element)
     _34 = ops.prim.NumToTensor(torch.size(_32, 2))
+
     # C_back = _32.shape[2] // 4；c3=1，后面的乘1只是导出展开。
     element0 = torch.floor_divide(_34, CONSTANTS.c2)
     _35 = int(element0)
     _36 = int(torch.mul(element, CONSTANTS.c3))
     _37 = int(torch.mul(element0, CONSTANTS.c3))
+
     # [B,324,4*C_back] → [B,18,18,2,2,C_back]
     # → permute 为 [B,C_back,2,18,2,18] → [B,C_back,36,36]。
     # 注意轴排列是“2,18”，不是常见相邻 patch 还原中的“18,2”；必须照实际运算理解。
     x3 = torch.reshape(_32, [_33, 18, 18, 2, 2, _35])
     x4 = torch.permute(x3, [0, 5, 3, 1, 4, 2])
     input0 = torch.reshape(x4, [_36, _37, 36, 36])
+
     # 阶段 5：解码恢复空间细节。
     # dec1(深层特征, conv2特征)；dec2(上一结果, conv1特征)；
     # dec3(上一结果, init_conv特征)。Up 类里可看到两路按通道拼接。
     # 跳跃连接给解码端提供编码阶段保留下来的空间信息。
+    # vit_conv：SingleConv，1×1 卷积，通道数从 C_back → 2560，便于与 dec3 拼接。
     _38 = (dec1).forward((vit_conv).forward(input0, ), _30, )
+
     _39 = (dec3).forward((dec2).forward(_38, _29, ), _28, )
+
     # 最后一个 Sequential 生成输出特征/预测通道；其内部细节需看对应导出子模块。
     _40 = (dec4).forward(_39, )
+
+
     # 阶段 6：去掉前面添加的边界。
     # x5 约等于 _40[:, :, pad_top:-pad_bottom, :]。
     # 这是实际导出的负索引写法；若 pad_bottom=0，-0 就是0，不能把它当作通用尺寸处理器。
@@ -220,9 +232,11 @@ class TransUnet(Module):
     _44 = torch.slice(x5, 0, 0, 9223372036854775807)
     _45 = torch.slice(_44, 1, 0, 9223372036854775807)
     _46 = torch.slice(_45, 2, 0, 9223372036854775807)
+
     # 去掉左右各 38 列周期填充，宽度回到 500。
     x6 = torch.slice(_46, 3, 38, -38)
     _47 = ops.prim.NumToTensor(torch.size(x6, 2))
+
     # 再把宽度重采样到固定 576；并非动态恢复任意输入宽度。
     # 外部流程把输出当作标准化场继续接力，最后才反标准化为物理量。
     # 本 forward 没有显式执行“最终输出 + 原始输入场”的残差预测操作。
@@ -232,6 +246,9 @@ class TransUnet(Module):
   
 # 【卷积残差块】主分支做多次卷积；捷径分支变换输入以匹配形状，最后相加。
 # 注意 bn1/bn2/bn3 的实际类型是 InstanceNorm2d，不是 BatchNorm2d。
+# ___torch_mangle_3.Conv2d：二维卷积层，会改变空间尺寸
+# ___torch_mangle_4.InstanceNorm2d：实例归一化层，它不通过卷积核提取局部模式，也不混合不同通道，而是调整各通道特征图的尺度
+
 class Bottleneck(Module):
   __parameters__ = []
   __buffers__ = []
@@ -255,16 +272,24 @@ class Bottleneck(Module):
     relu = self.relu
     bn1 = self.bn1
     conv1 = self.conv1
+
     # 主分支：Conv1 → InstanceNorm1 → ReLU → Conv2 → InstanceNorm2
     # → ReLU → Conv3 → InstanceNorm3。
     _49 = (bn1).forward((conv1).forward(argument_1, ), )
     _50 = (conv2).forward((relu).forward(_49, ), )
     _51 = (relu).forward1((bn2).forward(_50, ), )
     _52 = (bn3).forward((conv3).forward(_51, ), )
+
     # 残差相加：主分支结果 + 捷径分支 downsample(input)。
     # 两路必须形状一致；add_ 是原地加法。这里的“残差连接”不是预报误差校正模型。
+    # 【？】为什么要用下采样，而不是直接与argument_1相加？
+    # 因为 argument_1 经过几次卷积之后的形状已经不是 [B,C,Hf,Wf] 了，需要下采样到 [B,C,Hf,Wf] 才能相加。
     input = torch.add_(_52, (downsample).forward(argument_1, ))
+
+    # ReLU(x)=max(0,x)
     return (relu).forward2(input, )
+
+
 # 【空间特征 → token → Transformer】这是你优先学习的模块。
 # 输入来自 conv3，记为 [B,C,Hf,Wf]；输出是 [B,N,D]。
 # cls_token 和 pos_emb1D 是可学习参数，project_patches 是可学习线性投影。
@@ -353,7 +378,6 @@ class ViT(Module):
     # 沿序列轴把 cls_token 放在最前：[B,1,D]+[B,N,D] → [B,N+1,D]。
     # 它会参加注意力计算；虽然最后被删掉，也可能间接影响其他 token。
     img_patches0 = torch.cat(_68, 1)
-
     # 取前 N+1 个位置向量，形状 [N+1,D]，与整个 batch 广播相加。
     # 位置编码帮助网络区分序列位置；这里是可学习 pos_emb1D，别与前面的正余弦时间编码混淆。
     _69 = int(torch.add(tokens, CONSTANTS.c3))
@@ -361,6 +385,7 @@ class ViT(Module):
     input = torch.add(img_patches0, _70)
 
     # 经过 embedding dropout，再经过14层 Transformer。
+    # emb_dropout 用于在训练时随机将一部分输入元素置零，以减少过拟合
     # 序列长度和 token 特征维数在这些 block 中保持不变：[B,N+1,D]。
     # 推理调用端使用 eval 模式；实际 dropout 行为还取决于导出子模块中的训练标志。
     _71 = (transformer).forward((emb_dropout).forward(input, ), )
@@ -444,13 +469,25 @@ class TransformerBlock(Module):
     norm_1 = self.norm_1
     drop = self.drop
     mhsa = self.mhsa
+
     # 注意力在不同 token 之间交换信息，之后经过 dropout。
+    # 输出 [B,L,D]。
     _79 = (drop).forward((mhsa).forward(argument_1, ), )
-    # 第一条残差：把输入 x 加回来，随后 norm_1 沿特征维做 LayerNorm。
+
+    # 第一条残差：把输入 x 加回来
+    # 更新后的表示 = 原来的表示 + 根据全序列信息计算出的更新
     input = torch.add(_79, argument_1)
+
+    # 归一化：减去均值、再除以标准差，使每个 token 的特征分布更稳定。
     _80 = (norm_1).forward(input, )
-    # 前馈网络对各 token 应用共享的特征变换，再加第二条残差，最后 norm_2。
-    input2 = torch.add((linear).forward(_80, ), _80)
+
+    # 前馈网络对各 token 应用共享的特征变换
+    _81 = (linear).forward(_80, )
+
+    # 第二条残差：把前馈网络的输出加回来
+    input2 = torch.add(_81, _80)
+
+    # 归一化：减去均值、再除以标准差，使每个 token 的特征分布更稳定。
     return (norm_2).forward(input2, )
 # 【多头自注意力】输入 X=[B,L,D]，L 包括 cls_token。
 # Q（query）表达当前位置用什么特征匹配别人；K（key）提供被匹配特征；
@@ -470,52 +507,67 @@ class MultiHeadSelfAttention(Module):
     argument_1: Tensor) -> Tensor:
     W_0 = self.W_0
     to_qvk = self.to_qvk
+
     # 一次线性投影生成供 Q/K/V 使用的特征，总宽度是 3*h*d。
     # 虽然属性名字拼作 to_qvk，后面要按实际运算角色判断 Q、K、V 的顺序。
     _81 = (to_qvk).forward(argument_1, )
+
     element = ops.prim.NumToTensor(torch.size(_81, 0))
     _82 = int(element)
     element8 = ops.prim.NumToTensor(torch.size(_81, 1))
     _83 = int(element8)
     _84 = ops.prim.NumToTensor(torch.size(_81, 2))
+
     # c4=48=3×16，所以每头维数 d = 投影总宽度/48。
     element9 = torch.floor_divide(_84, CONSTANTS.c4)
+
     # [B,L,3*h*d] → [B,L,d,3,16]。
     # 注意这里的排列是 d,3,h；不要直接换成常见教程里的 3,h,d，权重分组会不同。
     x = torch.reshape(_81, [_82, _83, int(element9), 3, 16])
+
     # 变为 [3,B,16,L,d]；第0轴用于区分 Q/K/V。
     qkv_rearranged = torch.permute(x, [3, 0, 4, 1, 2])
+
     # _85=Q，_86=K，_87=V，三者均为 [B,16,L,d]。
     # 这是由后面“前两者点积、第三者被加权”的用法确定的。
     _85 = torch.select(qkv_rearranged, 0, 0)
     _86 = torch.select(qkv_rearranged, 0, 1)
     _87 = torch.select(qkv_rearranged, 0, 2)
+
     # 对特征维 d 求和：score[b,h,i,j] = sum_d Q[b,h,i,d]*K[b,h,j,d]。
     # 省略号代表共同的 B、h 轴；结果 [B,16,L,L]。
     # i 是当前查询位置，j 是可读取的位置。它不是通道×通道矩阵。
     _88 = torch.einsum("... i d , ... j d -> ... i j", [_85, _86])
+
     # 乘缩放常量 c5，控制点积数值尺度，避免 softmax 过早变得极端。
     scaled_dot_prod = torch.mul(_88, CONSTANTS.c5)
+    
     # softmax 沿最后的 j 轴计算：每个查询 i 对所有键位置 j 的权重和为1。
     # _89 只是 [注意力权重 A, V] 这个列表，并不是最终输出。
     _89 = [torch.softmax(scaled_dot_prod, -1), _87]
+
     # 加权汇总：Y[b,h,i,d] = sum_j A[b,h,i,j]*V[b,h,j,d]。
     # 结果 [B,16,L,d]。每个位置从全序列收集信息，但输出仍有 L 个位置。
     x10 = torch.einsum("... i j , ... j d -> ... i d", _89)
+    
     # 读取 B、h、L、d；后续 c3=1 的乘法可直接略读。
     element10 = ops.prim.NumToTensor(torch.size(x10, 0))
     element11 = ops.prim.NumToTensor(torch.size(x10, 1))
     element12 = ops.prim.NumToTensor(torch.size(x10, 2))
     element13 = ops.prim.NumToTensor(torch.size(x10, 3))
-    _90 = int(torch.mul(element10, CONSTANTS.c3))
-    _91 = int(torch.mul(element12, CONSTANTS.c3))
-    result = torch.mul(element11, CONSTANTS.c3)
-    _92 = int(torch.mul_(result, element13))
+    B = int(torch.mul(element10, CONSTANTS.c3))
+    h = int(torch.mul(element12, CONSTANTS.c3))
+    L = int(torch.mul(element11, CONSTANTS.c3))
+    d = int(torch.mul(element13, CONSTANTS.c3))
+
     # [B,h,L,d] → [B,L,h,d]，随后合并 h*d。
     x11 = torch.permute(x10, [0, 2, 1, 3])
+
     # 得到 [B,L,h*d]，把16个头的结果拼起来。
-    input = torch.reshape(x11, [_90, _91, _92])
+    input = torch.reshape(x11, [B, L, h * d])
+
     # 最后用可学习线性层混合各头的信息，输出投影回 block 所需的特征宽度 D。
+    # 输出 [B,L,D]。
     return (W_0).forward(input, )
 # 【卷积包装模块】SignleConv 是导出名称的原拼写，保留不改。
 # 这里仅调用内部 Sequential；不能从这个包装类看全卷积/归一化/激活配置。
@@ -529,6 +581,8 @@ class SignleConv(Module):
     input: Tensor) -> Tensor:
     conv = self.conv
     return (conv).forward(input, )
+
+  
 # 【带跳跃连接的上采样模块】
 # argument_1：来自更深层/前一级解码器的特征；argument_2：编码器保存的特征。
 # 先对 argument_1 做转置卷积上采样，再与 argument_2 按通道拼接。
@@ -548,9 +602,12 @@ class Up(Module):
     # 先计算上采样，再准备两路特征列表。二者空间 H/W 必须匹配。
     _93 = [argument_2, (up).forward(argument_1, )]
     # 沿通道拼接，而非逐元素相加：[B,C_skip,H,W]+[B,C_up,H,W]
+
     # → [B,C_skip+C_up,H,W]，随后 conv 融合两路特征。
     input = torch.cat(_93, 1)
     return (conv).forward(input, )
+
+  
 # 【解码端卷积包装】这里的 forward 把输入交给内部 Sequential。
 # 类名提示双卷积设计，但核大小、通道数、激活等应查该 Sequential 的实际定义。
 class DoubleConv(Module):

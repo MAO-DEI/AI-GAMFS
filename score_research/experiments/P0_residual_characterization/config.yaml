@@ -1,0 +1,37 @@
+experiment:
+  name: P0_residual_characterization
+  init_times: ["2024-07-24T22:30:00Z"]
+data:
+  input_dir: temp_asm
+  reference_dir: temp_asm
+  reference_files: [MERRA2_400.tavg1_2d_aer_Nx.20240725.nc4]
+forecast:
+  model_dir: model
+  device: "cuda:0"
+  initial_precision: fp16_roundtrip
+  seed: 0
+  cache_prefixes: true
+  resident_models: 1
+  lead_hours: [3, 6, 9, 12, 15, 18, 21, 24]
+  primary_strategy: longest_first
+  comparison_paths: [[12], [6, 6], [3, 3, 3, 3], [9, 3], [3, 9]]
+variables:
+  AOD: {model: TOTEXTTAU, reference: TOTEXTTAU}
+  DUAOD: {model: DUEXTTAU, reference: DUEXTTAU}
+  DUSMC: {model: DUSMASS, reference: DUSMASS}
+analysis:
+  statistics: true
+  spatial: true
+  lead_time: true
+  paths: true
+  negatives: true
+  persistence: true
+  conditions: true
+  lags: [1, 2, 4, 8, 16, 32]
+  latitude_bands: [-90, -60, -30, 0, 30, 60, 90]
+  negative_thresholds: {AOD: 0, DUAOD: 0, DUSMC: 0}
+  condition_bins: 8
+output:
+  directory: results
+  generate_html_report: true
+  dpi: 105

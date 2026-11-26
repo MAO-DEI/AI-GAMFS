@@ -34,8 +34,11 @@ def write_json(path, value):
 
 
 def digest(path):
+    sha256 = hashlib.sha256()
     with path.open("rb") as file:
-        return hashlib.file_digest(file, "sha256").hexdigest()
+        for block in iter(lambda: file.read(1024 * 1024), b""):
+            sha256.update(block)
+    return sha256.hexdigest()
 
 
 def identity(path, content=False):

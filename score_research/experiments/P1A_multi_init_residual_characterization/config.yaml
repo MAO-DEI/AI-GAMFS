@@ -1,0 +1,41 @@
+experiment:
+  name: P1A_multi_init_residual_characterization
+  init_start: "2024-07-26T22:30:00Z"
+  init_end: "2024-08-01T22:30:00Z"
+  init_interval_hours: 24
+data:
+  input_dir: temp_asm
+  reference_dir: temp_asm
+  reference_product: M2T1NXAER
+forecast:
+  model_dir: model
+  device: "cuda:0"
+  initial_precision: fp16_roundtrip
+  seed: 0
+  cache_prefixes: true
+  resident_models: 1
+  lead_hours: [3, 6, 9, 12, 15, 18, 21, 24]
+  primary_strategy: longest_first
+  comparison_paths: [[12], [6, 6], [3, 3, 3, 3], [9, 3], [3, 9]]
+variables:
+  BCEXTTAU: {model: BCEXTTAU, reference: BCEXTTAU}
+  BCSMASS: {model: BCSMASS, reference: BCSMASS}
+  DUAOD: {model: DUEXTTAU, reference: DUEXTTAU}
+  DUSMC: {model: DUSMASS, reference: DUSMASS}
+  OCEXTTAU: {model: OCEXTTAU, reference: OCEXTTAU}
+  OCSMASS: {model: OCSMASS, reference: OCSMASS}
+  SO4SMASS: {model: SO4SMASS, reference: SO4SMASS}
+  SSEXTTAU: {model: SSEXTTAU, reference: SSEXTTAU}
+  SSSMASS: {model: SSSMASS, reference: SSSMASS}
+  SUEXTTAU: {model: SUEXTTAU, reference: SUEXTTAU}
+  AOD: {model: TOTEXTTAU, reference: TOTEXTTAU}
+  TOTSCATAU: {model: TOTSCATAU, reference: TOTSCATAU}
+analysis:
+  focus_variables: [AOD, DUAOD, DUSMC]
+  lags: [1, 2, 4, 8, 16, 32]
+  latitude_bands: [-90, -60, -30, 0, 30, 60, 90]
+  condition_bins: 8
+  denominator_rtol: 1.0e-8
+  dpi: 105
+output:
+  directory: results

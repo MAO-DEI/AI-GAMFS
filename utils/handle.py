@@ -1,4 +1,4 @@
-import glob
+from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -20,6 +20,7 @@ warnings.filterwarnings("ignore")
 
 
 from tqdm import tqdm
+from utils.datasets import ALIASES, geos_candidates
 from utils.init import get_vars
 from matplotlib import pyplot as plt
 from datetime import datetime
@@ -131,100 +132,31 @@ def anti_stand(index: list, data: np.ndarray, scale_factor: float = 1.0):
 
 
 # 导入模式实况初始场
-def open_asm_merra(time, scale_factor = 2, interp_method ="linear"):
-
-    '''
-    用于读入GEOS同化初始场
-    @param time: 时间
-    @param scale_factor: 初始场下采样比例
-    @param interp_method: 下采样方法
-    @return: 数据矩阵
-    '''
-
-    var_dict = get_vars()
-
-    # 获取初始场日期字符串
-    time_str = time.replace(" ", "_")
-    time_str = time_str.replace("-", "")
-    time_str = time_str.replace(":", "")
-
-    # 输出结果
+def open_asm_merra(time, scale_factor=2, interp_method="linear"):
+    """Read the original 54 GEOS-FP channels on the model grid."""
+    stamp = pd.Timestamp(time)
     total_matrix = []
     index = []
-
-    # 获取数据
-    for key, value in var_dict.items():
-
-        # tavg1_2d_aer_Nx (tavg3_2d_aer_Nx)
-        if key == "tavg1_2d_aer_Nx":
-
-            folder_path = "./temp_asm/GEOS.fp.asm." + key.replace("tavg1", "tavg3") + "/"
-            file_list = glob.glob(folder_path + "*.hdf")
-            file = [file for file in file_list if time_str in file]
-
-            if len(file) == 1:
-
-                file = file[0]
-                f = xr.open_dataset(file)
-                for var in value:
-                    data = f[var].loc[time, :, :]
-                    data = data.interp(lon=data.lon.values[::scale_factor], lat=data.lat.values[::scale_factor], method=interp_method)
-                    total_matrix.append(data.values.squeeze())
-                    index.append(var)
-                f.close()
-
-        # tavg1_2d_flx_Nx
-        elif key == "tavg1_2d_flx_Nx":
-
-            folder_path = "./temp_asm/GEOS.fp.asm." + key + "/"
-            file_list = glob.glob(folder_path + "*.hdf")
-            file = [file for file in file_list if time_str in file]
-
-            if len(file) == 1:
-
-                file = file[0]
-                f = xr.open_dataset(file)
-                for var in value:
-                    data = f[var].loc[time, :, :]
-                    data = data.interp(lon=data.lon.values[::scale_factor], lat=data.lat.values[::scale_factor], method=interp_method)
-                    total_matrix.append(data.values.squeeze())
-                    index.append(var)
-                f.close()
-
-        # tavg3_3d_asm_Nv
-        elif key == "tavg3_3d_asm_Nv":
-
-            folder_path = "./temp_asm/GEOS.fp.asm." + key + "/"
-            file_list = glob.glob(folder_path + "*.hdf")
-            file = [file for file in file_list if time_str in file]
-
-            if len(file) == 1:
-
-                file = file[0]
-                f = xr.open_dataset(file)
-
-                for var_ in value["var"]:
-                    if var_ in ["H", "QV", "RH", "T", "U", "V", "OMEGA"]:
-                        for level_ in value["level"]:
-                            data = f[var_].loc[time, level_, :, :]
-                            data = data.interp(lon=data.lon.values[::scale_factor], lat=data.lat.values[::scale_factor], method=interp_method)
-                            total_matrix.append(data.values.squeeze())
-                            index.append(var_ + "_" + str(level_))
-                    else:
-                        data = f[var_].loc[time, :, :]
-                        data = data.interp(lon=data.lon.values[::scale_factor], lat=data.lat.values[::scale_factor], method=interp_method)
-                        total_matrix.append(data.values.squeeze())
-                        index.append(var_)
-                f.close()
-
-    total_matrix = np.stack(total_matrix, axis=0)
-
-    lon = data["lon"].values
-    lat = data["lat"].values
-
-    if total_matrix.shape[0] == 54:
-        return total_matrix, index, lon, lat, time_str
-
-
-
-
+    for key, variables in get_vars().items():
+        collection = "tavg3_2d_aer_Nx" if key == "tavg1_2d_aer_Nx" else key
+        product = ALIASES[collection.casefold()]
+        candidates = geos_candidates(Path("temp_asm"), product, stamp)
+        if len(candidates) != 1:
+            raise ValueError(f"{collection} {stamp}: expected one GEOS-FP file, found {candidates}")
+        if isinstance(variables, dict):
+            layered = {"H", "QV", "RH", "T", "U", "V", "OMEGA"}
+            channels = [(name, level) for name in variables["var"]
+                        for level in (variables["level"] if name in layered else [None])]
+        else:
+            channels = [(name, None) for name in variables]
+        with xr.open_dataset(candidates[0]) as source:
+            for name, level in channels:
+                field = source[name].sel(time=stamp)
+                if level is not None:
+                    field = field.sel(lev=level)
+                data = field.interp(lon=field.lon.values[::scale_factor],
+                                    lat=field.lat.values[::scale_factor], method=interp_method)
+                total_matrix.append(data.values.squeeze())
+                index.append(name if level is None else f"{name}_{level}")
+    if len(index) == 54:
+        return np.stack(total_matrix), index, data.lon.values, data.lat.values, stamp.strftime("%Y%m%d_%H%M")

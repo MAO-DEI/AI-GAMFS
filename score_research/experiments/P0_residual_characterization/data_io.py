@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 import pandas as pd
 import xarray as xr
+from utils.datasets import ALIASES, classify, geos_candidates, reference_path
 
 STEPS = (12, 9, 6, 3)
 GRID_SHAPE = (361, 576)
@@ -110,6 +111,31 @@ def choose_time(ds, when, path):
     return ds.isel(time=int(indices[0]))
 
 
+def resolve_reference_files(root, config):
+    data = config["data"]
+    directory = root / data["reference_dir"]
+    if data.get("reference_files"):
+        return [reference_path(directory, name) for name in data["reference_files"]]
+    name = data.get("reference_product", "M2T1NXAER")
+    product = ALIASES.get(name.casefold())
+    if product is None or not product.merra_host:
+        raise ValueError(f"Unknown MERRA-2 reference product: {name}")
+    days = {(utc(t) + pd.Timedelta(hours=sum(path))).normalize().to_pydatetime()
+            for t in config["experiment"]["init_times"] for path in plans(config)}
+    found = {day: set() for day in days}
+    for folder in (directory, directory / product.directory):
+        for path in folder.glob("*.nc4"):
+            item = classify(path.name)
+            if item and item[0] == product and item[1] in found and not item[2]:
+                found[item[1]].add(path.resolve())
+    result = []
+    for day, paths in sorted(found.items()):
+        if len(paths) != 1:
+            raise ValueError(f"{name} {day:%Y-%m-%d}: expected one reference file, found {sorted(paths)}")
+        result.append(next(iter(paths)))
+    return result
+
+
 class Inputs:
     def __init__(self, root, config, include_initial=True):
         self.root = root
@@ -121,9 +147,7 @@ class Inputs:
         self.mapping = config["variables"]
         if not self.mapping:
             raise ValueError("At least one variable is required")
-        self.reference_files = [
-            root / config["data"]["reference_dir"] / p for p in config["data"]["reference_files"]
-        ]
+        self.reference_files = resolve_reference_files(root, config)
         self.input_files = {}
         self.reference_times = {}
         with (root / "info.pkl").open("rb") as file:
@@ -171,11 +195,7 @@ class Inputs:
             self.input_files[when] = {}
             key = when.strftime("%Y%m%d_%H%M")
             for product in self.groups:
-                candidates = sorted({
-                    p.resolve() for folder in (directory, directory / product)
-                    for p in folder.glob(f"{product}.{key}.*")
-                    if p.is_file() and p.suffix.lower() in {".hdf", ".nc4", ".nc"}
-                })
+                candidates = geos_candidates(directory, ALIASES[product.casefold()], when)
                 if len(candidates) != 1:
                     missing.append(f"{product}.{key}: expected one file, found {candidates}")
                 else:

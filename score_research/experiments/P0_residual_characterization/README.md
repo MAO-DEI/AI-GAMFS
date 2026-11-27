@@ -32,7 +32,7 @@ find temp_asm -type f \( -name '*20240724_2230*' -o -name 'MERRA2_400.tavg1_2d_a
 python -B "$CLI" inspect --root "$ROOT" --config "$CFG" --run-id "$RUN"
 ```
 
-应有 `GEOS.fp.asm.tavg3_2d_aer_Nx`、`GEOS.fp.asm.tavg1_2d_flx_Nx` 和 `GEOS.fp.asm.tavg3_3d_asm_Nv` 各一份。文件名格式为 `<product>.20240724_2230.V01.hdf`，也接受 `.nc4` 与 `.nc`。同一产品放在 `temp_asm` 平铺目录或同名子目录。参考文件路径在配置中独立指定。inspect 写出运行目录内的 `data_validation.json` 和 `status.json`，失败返回非零。
+应有 `GEOS.fp.asm.tavg3_2d_aer_Nx`、`GEOS.fp.asm.tavg1_2d_flx_Nx` 和 `GEOS.fp.asm.tavg3_3d_asm_Nv` 各一份。文件名格式为 `<product>.20240724_2230.V01.hdf`，也接受 `.nc4` 与 `.nc`。GEOS-FP 放在 `temp_asm` 的同名产品子目录，也兼容平铺文件。按默认 `reference_dir: temp_asm` 配置，MERRA-2 裸文件名会解析到 `temp_asm/MERRA-2/<产品名>/`，也兼容平铺文件。省略 `reference_files` 并设置 `reference_product: M2T1NXAER` 可按起报与时效自动选参考日期。P0 的默认变量仍使用 M2T1NXAER。批量下载和整理命令见[数据管理说明](../../../data/README.md)。inspect 写出运行目录内的 `data_validation.json` 和 `status.json`，失败返回非零。
 
 ## 正式运行、恢复与重分析
 

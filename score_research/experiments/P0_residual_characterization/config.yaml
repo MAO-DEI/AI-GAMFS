@@ -1,10 +1,10 @@
 experiment:
   name: P0_residual_characterization
-  init_times: ["2024-07-24T22:30:00Z"]
+  init_times: ["2024-07-26T22:30:00Z"]
 data:
   input_dir: temp_asm
   reference_dir: temp_asm
-  reference_files: [MERRA2_400.tavg1_2d_aer_Nx.20240725.nc4]
+  reference_files: [MERRA2_400.tavg1_2d_aer_Nx.20240727.nc4]
 forecast:
   model_dir: model
   device: "cuda:0"

@@ -73,7 +73,7 @@ def forecast_signature(inputs, env, strict_hash, hash_cache):
     weights = {inputs.weight(step) for path in inputs.plans for step in path}
     code = [HERE / p for p in ("forecast.py", "data_io.py")] + [
         inputs.root / p for p in ("utils/init.py", "utils/handle.py", "utils/scheduler.py",
-                                 "merra_norm.csv", "info.pkl")]
+                                 "utils/datasets.py", "merra_norm.csv", "info.pkl")]
     sources = []
     for path in sorted(source_files | weights):
         item = identity(path)
@@ -161,11 +161,10 @@ def execute(phase, root, config, run, status, args, prior):
             write_json(run / "metadata.json", importance)
             return path
         case "build":
-            from data_io import build
+            from data_io import build, resolve_reference_files
 
             forecast = require(run, status, "forecast", "data/forecasts.nc")
-            reference = [root / config["data"]["reference_dir"] / p
-                         for p in config["data"]["reference_files"]]
+            reference = resolve_reference_files(root, config)
             dependencies = dict(forecast=identity(forecast), reference=[identity(p) for p in reference],
                                 code=digest(HERE / "data_io.py"))
             manifest = run / "build_inputs.json"

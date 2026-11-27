@@ -1,76 +1,37 @@
 import shutil
-import time
-import xarray as xr
 import numpy as np
 import pandas as pd
 import torch
 import sys
 import os
 import subprocess
-import platform
+from pathlib import Path
 
 sys.path.append(".")
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from tqdm import tqdm
-from utils.init import load_3h_model, load_6h_model, load_9h_model, load_12h_model, get_vars
+from download_data import fetch
+from utils.datasets import PRODUCTS
+from utils.init import load_3h_model, load_6h_model, load_9h_model, load_12h_model
 from utils.handle import open_asm_merra, stand, anti_stand, convert2dataarray
 from utils.scheduler import rolling_model
 
 def update_asm(year, month, day, hour, minute, temp_folder):
-    url = {
-        "GEOS.fp.asm.tavg3_3d_asm_Nv": f"https://portal.nccs.nasa.gov/datashare/gmao/geos-fp/das/Y{year}/M{month}/D{day}/GEOS.fp.asm.tavg3_3d_asm_Nv.{year + month + day}_{hour + minute}.V01.nc4",
-        "GEOS.fp.asm.tavg1_2d_flx_Nx": f"https://portal.nccs.nasa.gov/datashare/gmao/geos-fp/das/Y{year}/M{month}/D{day}/GEOS.fp.asm.tavg1_2d_flx_Nx.{year + month + day}_{hour + minute}.V01.nc4",
-        "GEOS.fp.asm.tavg3_2d_aer_Nx": f"https://portal.nccs.nasa.gov/datashare/gmao/geos-fp/das/Y{year}/M{month}/D{day}/GEOS.fp.asm.tavg3_2d_aer_Nx.{year + month + day}_{hour + minute}.V01.nc4"
-    }
-
-    tag_list = []
-    for key, value in url.items():
-        save_folder = f"{temp_folder}/{key}/"
-        update_folder(save_folder)
-        tag = download_file(value, save_folder)
-        if not tag:
-            tag_list.append(False)
+    stamp = datetime.strptime(year + month + day + hour + minute, "%Y%m%d%H%M")
+    results = []
+    for product in PRODUCTS:
+        if product.merra_host:
+            continue
+        try:
+            fetch(Path(temp_folder), product, stamp)
+        except (OSError, ValueError, AttributeError, TypeError, subprocess.CalledProcessError) as error:
+            print(f"GEOS-FP {product.name} {stamp}: {error}")
+            results.append(False)
             break
-        tag_list.append(True)
-    return tag_list
+        results.append(True)
+    return results
 
-def download_file(url, download_folder="/data/GEOS-FP", local_filename=None):
-    if local_filename is None:
-        local_filename = os.path.basename(url)
-    file_path = os.path.join(download_folder, local_filename)
-    file_path = file_path.replace("nc4", "hdf")
-    if os.path.exists(file_path):
-        try:
-            xr.open_dataset(file_path)
-            print(f"文件已存在且完整: {file_path}")
-            return True
-        except Exception as e:
-            print(f"文件已存在，但无法打开，错误: {e}")
-            print("将继续下载文件...")
-    print(f"开始下载文件: {url}")
-    os.makedirs(download_folder, exist_ok=True)
-    try:
-        system = platform.system().lower()
-        if system == "windows":
-            wget_command = ["./wget.exe", "-c", url, "-O", file_path]
-        elif system == "linux":
-            wget_command = ["wget", "-c", url, "-O", file_path]
-        subprocess.run(wget_command, check=True)
-        # 验证下载的文件是否有效
-        try:
-            ds = xr.open_dataset(file_path)
-            ds.close()
-            print(f"文件已成功下载到: {file_path}")
-            return True
-        except Exception as e:
-            print(f"下载的文件无法打开: {file_path}, 错误: {e}")
-            if os.path.exists(file_path):
-                os.remove(file_path)  # 删除无效文件
-            return False
-    except subprocess.CalledProcessError as e:
-        print(f"下载文件时出现错误: {e}")
-        return False
 
 def update_folder(folder):
     """检查文件夹是否存在且是否为空"""

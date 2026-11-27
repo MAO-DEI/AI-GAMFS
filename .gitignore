@@ -1,3 +1,17 @@
 /model/
 /temp_asm/
 /inference/
+/results/
+# Jupyter Notebook 缓存
+.ipynb_checkpoints/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 运行日志
+*.log
+nohup.out
+
+# Python 虚拟环境
+.venv/

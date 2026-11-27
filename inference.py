@@ -74,8 +74,8 @@ if __name__ == "__main__":
     processed_times = set()
 
     date_range = pd.date_range(
-        start="2025-03-19 19:30:00",
-        end="2025-03-19 19:30:00",
+        start="2024-07-26 22:30:00",
+        end="2024-07-26 22:30:00",
         freq="1D"
     )
 
